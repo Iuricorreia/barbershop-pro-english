@@ -172,6 +172,7 @@ async function initDatabase() {
     )
   `);
 
+  await pool.query(`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS duration_minutes INTEGER NOT NULL DEFAULT 30`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_bookings_date_time ON bookings (booking_date, booking_time)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings (status)`);
 
@@ -317,44 +318,113 @@ async function getBookings() {
       barber_name AS "barberName",
       TO_CHAR(booking_date, 'YYYY-MM-DD') AS date,
       TO_CHAR(booking_time, 'HH24:MI') AS time,
-      notes
+      notes,
+      duration_minutes AS "durationMinutes"
     FROM bookings
     ORDER BY created_at DESC
   `);
   return rows;
 }
 
-async function createBookingRecord(booking) {
-  if (!pool) {
-    const bookings = readJson("bookings.json", defaultBookings);
-    bookings.unshift(booking);
-    writeJson("bookings.json", bookings);
-    return booking;
-  }
-
-  await pool.query(`
-    INSERT INTO bookings (
-      id, created_at, status, name, phone,
-      service_id, service_name, barber_id, barber_name,
-      booking_date, booking_time, notes
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-  `, [
-    booking.id,
-    booking.createdAt,
-    booking.status,
-    booking.name,
-    booking.phone,
-    booking.serviceId,
-    booking.serviceName,
-    booking.barberId,
-    booking.barberName,
-    booking.date,
-    booking.time,
-    booking.notes
-  ]);
-  return booking;
+function timeToMinutes(value) {
+  const [h, m] = String(value || "").split(":").map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return -1;
+  return h * 60 + m;
 }
 
+function bookingsOverlap(startA, durationA, startB, durationB) {
+  const a = timeToMinutes(startA);
+  const b = timeToMinutes(startB);
+  return a < b + Number(durationB || 30) && b < a + Number(durationA || 30);
+}
+
+async function createBookingRecordIfAvailable(booking) {
+  if (!pool) {
+    const bookings = readJson("bookings.json", defaultBookings);
+    const conflict = bookings.some(x =>
+      x.barberId === booking.barberId &&
+      x.date === booking.date &&
+      ["pending","confirmed"].includes(x.status) &&
+      bookingsOverlap(
+        booking.time,
+        booking.durationMinutes,
+        x.time,
+        x.durationMinutes || 30
+      )
+    );
+    if (conflict) return false;
+
+    bookings.unshift(booking);
+    writeJson("bookings.json", bookings);
+    return true;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Serializes bookings for the same barber/day so simultaneous requests
+    // cannot both claim an overlapping slot.
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtext($1))`,
+      [`${booking.barberId}:${booking.date}`]
+    );
+
+    const startMinutes = timeToMinutes(booking.time);
+    const endMinutes = startMinutes + Number(booking.durationMinutes || 30);
+
+    const conflict = await client.query(`
+      SELECT id
+      FROM bookings
+      WHERE barber_id = $1
+        AND booking_date = $2
+        AND status IN ('pending','confirmed')
+        AND (
+          (EXTRACT(HOUR FROM booking_time) * 60 + EXTRACT(MINUTE FROM booking_time)) < $4
+        )
+        AND (
+          (EXTRACT(HOUR FROM booking_time) * 60 + EXTRACT(MINUTE FROM booking_time))
+          + duration_minutes > $3
+        )
+      LIMIT 1
+    `, [booking.barberId, booking.date, startMinutes, endMinutes]);
+
+    if (conflict.rows.length) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+
+    await client.query(`
+      INSERT INTO bookings (
+        id, created_at, status, name, phone,
+        service_id, service_name, barber_id, barber_name,
+        booking_date, booking_time, notes, duration_minutes
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+    `, [
+      booking.id,
+      booking.createdAt,
+      booking.status,
+      booking.name,
+      booking.phone,
+      booking.serviceId,
+      booking.serviceName,
+      booking.barberId,
+      booking.barberName,
+      booking.date,
+      booking.time,
+      booking.notes,
+      booking.durationMinutes
+    ]);
+
+    await client.query("COMMIT");
+    return true;
+  } catch (err) {
+    try { await client.query("ROLLBACK"); } catch {}
+    throw err;
+  } finally {
+    client.release();
+  }
+}
 async function updateBookingStatus(idValue, status) {
   if (!pool) {
     const bookings = readJson("bookings.json", defaultBookings);
@@ -383,7 +453,8 @@ async function updateBookingStatus(idValue, status) {
       barber_name AS "barberName",
       TO_CHAR(booking_date, 'YYYY-MM-DD') AS date,
       TO_CHAR(booking_time, 'HH24:MI') AS time,
-      notes
+      notes,
+      duration_minutes AS "durationMinutes"
   `, [idValue, status]);
 
   return rows[0] || null;
@@ -435,25 +506,67 @@ app.post("/api/bookings", async (req, res) => {
 
     const config = await getConfig();
     const service = (config.services || []).find(x => x.id === serviceId && x.active);
-    const barber = barberId ? (config.team || []).find(x => x.id === barberId && x.active) : null;
+    const requestedBarber = barberId ? (config.team || []).find(x => x.id === barberId && x.active) : null;
     if (!service) return res.status(400).json({ error: "Service is not available." });
+    if (barberId && !requestedBarber) return res.status(400).json({ error: "Barber is not available." });
 
     const day = new Date(`${date}T12:00:00`).getDay();
     const range = config.hours?.[String(day)];
     if (!range) return res.status(400).json({ error: "The barbershop is closed on that day." });
-    if (time < range[0] || time >= range[1]) return res.status(400).json({ error: "That time is outside opening hours." });
 
-    const booking = {
-      id: id("bk"),
-      createdAt: new Date().toISOString(),
-      status: "pending",
-      name, phone,
-      serviceId: service.id, serviceName: service.name,
-      barberId: barber ? barber.id : "", barberName: barber ? barber.name : "No preference",
-      date, time, notes
-    };
+    const requestedStart = timeToMinutes(time);
+    const openingStart = timeToMinutes(range[0]);
+    const openingEnd = timeToMinutes(range[1]);
+    const durationMinutes = Number(service.minutes || 30);
 
-    await createBookingRecord(booking);
+    if (
+      requestedStart < openingStart ||
+      requestedStart >= openingEnd ||
+      requestedStart + durationMinutes > openingEnd
+    ) {
+      return res.status(400).json({ error: "That time is outside opening hours." });
+    }
+
+    const candidates = requestedBarber
+      ? [requestedBarber]
+      : (config.team || []).filter(x => x.active);
+
+    if (!candidates.length) {
+      return res.status(409).json({ error: "No barbers are available." });
+    }
+
+    let booking = null;
+
+    for (const candidate of candidates) {
+      const candidateBooking = {
+        id: id("bk"),
+        createdAt: new Date().toISOString(),
+        status: "pending",
+        name, phone,
+        serviceId: service.id,
+        serviceName: service.name,
+        barberId: candidate.id,
+        barberName: candidate.name,
+        date,
+        time,
+        notes,
+        durationMinutes
+      };
+
+      const saved = await createBookingRecordIfAvailable(candidateBooking);
+      if (saved) {
+        booking = candidateBooking;
+        break;
+      }
+    }
+
+    if (!booking) {
+      return res.status(409).json({
+        error: requestedBarber
+          ? "That barber is already booked at this time. Please choose another time or barber."
+          : "No barbers are available at this time. Please choose another time."
+      });
+    }
 
     let whatsappUrl = "";
     if (validWhatsapp(config.whatsapp) && config.whatsapp !== "000000000") {
@@ -694,6 +807,7 @@ async function start() {
 }
 
 start();
+
 
 
 
