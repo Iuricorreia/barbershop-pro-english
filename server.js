@@ -1,7 +1,8 @@
-const express = require("express");
+﻿const express = require("express");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+const { Pool } = require("pg");
 require("dotenv").config();
 
 const app = express();
@@ -10,6 +11,10 @@ const ROOT = __dirname;
 const DATA = path.join(ROOT, "data");
 const PUBLIC = path.join(ROOT, "public");
 const sessions = new Map();
+
+const pool = process.env.DATABASE_URL
+  ? new Pool({ connectionString: process.env.DATABASE_URL })
+  : null;
 
 app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
@@ -59,6 +64,7 @@ function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
   return { salt, hash };
 }
 function verifyPassword(password, record) {
+  if (!record || !record.salt || !record.hash) return false;
   const candidate = crypto.scryptSync(password, record.salt, 64);
   const stored = Buffer.from(record.hash, "hex");
   return candidate.length === stored.length && crypto.timingSafeEqual(candidate, stored);
@@ -139,6 +145,165 @@ function ensureSeed() {
 }
 ensureSeed();
 
+async function initDatabase() {
+  if (!pool) {
+    console.log("DATABASE_URL not set: bookings will use local JSON fallback.");
+    return;
+  }
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS bookings (
+      id TEXT PRIMARY KEY,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ,
+      status TEXT NOT NULL DEFAULT 'pending',
+      name TEXT NOT NULL,
+      phone TEXT NOT NULL DEFAULT '',
+      service_id TEXT NOT NULL,
+      service_name TEXT NOT NULL,
+      barber_id TEXT NOT NULL DEFAULT '',
+      barber_name TEXT NOT NULL DEFAULT 'No preference',
+      booking_date DATE NOT NULL,
+      booking_time TIME NOT NULL,
+      notes TEXT NOT NULL DEFAULT ''
+    )
+  `);
+
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_bookings_date_time ON bookings (booking_date, booking_time)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings (status)`);
+
+  const legacy = readJson("bookings.json", defaultBookings);
+  for (const b of legacy) {
+    if (!b?.id || !b?.name || !b?.serviceId || !b?.date || !b?.time) continue;
+    await pool.query(`
+      INSERT INTO bookings (
+        id, created_at, updated_at, status, name, phone,
+        service_id, service_name, barber_id, barber_name,
+        booking_date, booking_time, notes
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+      ON CONFLICT (id) DO NOTHING
+    `, [
+      b.id,
+      b.createdAt || new Date().toISOString(),
+      b.updatedAt || null,
+      b.status || "pending",
+      b.name,
+      b.phone || "",
+      b.serviceId,
+      b.serviceName || "",
+      b.barberId || "",
+      b.barberName || "No preference",
+      b.date,
+      b.time,
+      b.notes || ""
+    ]);
+  }
+
+  console.log("PostgreSQL bookings table ready.");
+}
+
+async function getBookings() {
+  if (!pool) return readJson("bookings.json", defaultBookings);
+
+  const { rows } = await pool.query(`
+    SELECT
+      id,
+      created_at AS "createdAt",
+      updated_at AS "updatedAt",
+      status,
+      name,
+      phone,
+      service_id AS "serviceId",
+      service_name AS "serviceName",
+      barber_id AS "barberId",
+      barber_name AS "barberName",
+      TO_CHAR(booking_date, 'YYYY-MM-DD') AS date,
+      TO_CHAR(booking_time, 'HH24:MI') AS time,
+      notes
+    FROM bookings
+    ORDER BY created_at DESC
+  `);
+  return rows;
+}
+
+async function createBookingRecord(booking) {
+  if (!pool) {
+    const bookings = readJson("bookings.json", defaultBookings);
+    bookings.unshift(booking);
+    writeJson("bookings.json", bookings);
+    return booking;
+  }
+
+  await pool.query(`
+    INSERT INTO bookings (
+      id, created_at, status, name, phone,
+      service_id, service_name, barber_id, barber_name,
+      booking_date, booking_time, notes
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+  `, [
+    booking.id,
+    booking.createdAt,
+    booking.status,
+    booking.name,
+    booking.phone,
+    booking.serviceId,
+    booking.serviceName,
+    booking.barberId,
+    booking.barberName,
+    booking.date,
+    booking.time,
+    booking.notes
+  ]);
+  return booking;
+}
+
+async function updateBookingStatus(idValue, status) {
+  if (!pool) {
+    const bookings = readJson("bookings.json", defaultBookings);
+    const b = bookings.find(x => x.id === idValue);
+    if (!b) return null;
+    b.status = status;
+    b.updatedAt = new Date().toISOString();
+    writeJson("bookings.json", bookings);
+    return b;
+  }
+
+  const { rows } = await pool.query(`
+    UPDATE bookings
+    SET status=$2, updated_at=NOW()
+    WHERE id=$1
+    RETURNING
+      id,
+      created_at AS "createdAt",
+      updated_at AS "updatedAt",
+      status,
+      name,
+      phone,
+      service_id AS "serviceId",
+      service_name AS "serviceName",
+      barber_id AS "barberId",
+      barber_name AS "barberName",
+      TO_CHAR(booking_date, 'YYYY-MM-DD') AS date,
+      TO_CHAR(booking_time, 'HH24:MI') AS time,
+      notes
+  `, [idValue, status]);
+
+  return rows[0] || null;
+}
+
+async function deleteBookingRecord(idValue) {
+  if (!pool) {
+    const bookings = readJson("bookings.json", defaultBookings);
+    const next = bookings.filter(x => x.id !== idValue);
+    if (next.length === bookings.length) return false;
+    writeJson("bookings.json", next);
+    return true;
+  }
+
+  const result = await pool.query(`DELETE FROM bookings WHERE id=$1`, [idValue]);
+  return result.rowCount > 0;
+}
+
 app.get("/api/public", (req, res) => {
   const c = readJson("config.json", defaultConfig);
   const safe = {
@@ -152,65 +317,69 @@ app.get("/api/public", (req, res) => {
   res.json(safe);
 });
 
-app.post("/api/bookings", (req, res) => {
-  const body = req.body || {};
-  const name = cleanText(body.name, 80);
-  const phone = cleanText(body.phone, 40);
-  const serviceId = cleanText(body.serviceId, 100);
-  const barberId = cleanText(body.barberId, 100);
-  const date = cleanText(body.date, 20);
-  const time = cleanText(body.time, 10);
-  const notes = cleanText(body.notes, 500);
+app.post("/api/bookings", async (req, res) => {
+  try {
+    const body = req.body || {};
+    const name = cleanText(body.name, 80);
+    const phone = cleanText(body.phone, 40);
+    const serviceId = cleanText(body.serviceId, 100);
+    const barberId = cleanText(body.barberId, 100);
+    const date = cleanText(body.date, 20);
+    const time = cleanText(body.time, 10);
+    const notes = cleanText(body.notes, 500);
 
-  if (!name || !serviceId || !date || !time) {
-    return res.status(400).json({ error: "Name, service, date and time are required." });
+    if (!name || !serviceId || !date || !time) {
+      return res.status(400).json({ error: "Name, service, date and time are required." });
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) {
+      return res.status(400).json({ error: "Invalid date or time." });
+    }
+
+    const config = readJson("config.json", defaultConfig);
+    const service = (config.services || []).find(x => x.id === serviceId && x.active);
+    const barber = barberId ? (config.team || []).find(x => x.id === barberId && x.active) : null;
+    if (!service) return res.status(400).json({ error: "Service is not available." });
+
+    const day = new Date(`${date}T12:00:00`).getDay();
+    const range = config.hours?.[String(day)];
+    if (!range) return res.status(400).json({ error: "The barbershop is closed on that day." });
+    if (time < range[0] || time >= range[1]) return res.status(400).json({ error: "That time is outside opening hours." });
+
+    const booking = {
+      id: id("bk"),
+      createdAt: new Date().toISOString(),
+      status: "pending",
+      name, phone,
+      serviceId: service.id, serviceName: service.name,
+      barberId: barber ? barber.id : "", barberName: barber ? barber.name : "No preference",
+      date, time, notes
+    };
+
+    await createBookingRecord(booking);
+
+    let whatsappUrl = "";
+    if (validWhatsapp(config.whatsapp) && config.whatsapp !== "000000000") {
+      const msg = [
+        `Hello! I would like to book at ${config.businessName}.`,
+        "",
+        `Name: ${name}`,
+        `Service: ${service.name}`,
+        `Barber: ${booking.barberName}`,
+        `Date: ${date}`,
+        `Time: ${time}`,
+        phone ? `Phone: ${phone}` : "",
+        notes ? `Notes: ${notes}` : "",
+        "",
+        `Booking reference: ${booking.id}`
+      ].filter(Boolean).join("\n");
+      whatsappUrl = `https://wa.me/${config.whatsapp}?text=${encodeURIComponent(msg)}`;
+    }
+
+    res.status(201).json({ ok:true, bookingId: booking.id, whatsappUrl });
+  } catch (err) {
+    console.error("Create booking failed:", err);
+    res.status(500).json({ error: "Could not save the booking." });
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) {
-    return res.status(400).json({ error: "Invalid date or time." });
-  }
-
-  const config = readJson("config.json", defaultConfig);
-  const service = (config.services || []).find(x => x.id === serviceId && x.active);
-  const barber = barberId ? (config.team || []).find(x => x.id === barberId && x.active) : null;
-  if (!service) return res.status(400).json({ error: "Service is not available." });
-
-  const day = new Date(`${date}T12:00:00`).getDay();
-  const range = config.hours?.[String(day)];
-  if (!range) return res.status(400).json({ error: "The barbershop is closed on that day." });
-  if (time < range[0] || time >= range[1]) return res.status(400).json({ error: "That time is outside opening hours." });
-
-  const bookings = readJson("bookings.json", defaultBookings);
-  const booking = {
-    id: id("bk"),
-    createdAt: new Date().toISOString(),
-    status: "pending",
-    name, phone,
-    serviceId: service.id, serviceName: service.name,
-    barberId: barber ? barber.id : "", barberName: barber ? barber.name : "No preference",
-    date, time, notes
-  };
-  bookings.unshift(booking);
-  writeJson("bookings.json", bookings);
-
-  let whatsappUrl = "";
-  if (validWhatsapp(config.whatsapp) && config.whatsapp !== "000000000") {
-    const msg = [
-      `Hello! I would like to book at ${config.businessName}.`,
-      "",
-      `Name: ${name}`,
-      `Service: ${service.name}`,
-      `Barber: ${booking.barberName}`,
-      `Date: ${date}`,
-      `Time: ${time}`,
-      phone ? `Phone: ${phone}` : "",
-      notes ? `Notes: ${notes}` : "",
-      "",
-      `Booking reference: ${booking.id}`
-    ].filter(Boolean).join("\n");
-    whatsappUrl = `https://wa.me/${config.whatsapp}?text=${encodeURIComponent(msg)}`;
-  }
-
-  res.status(201).json({ ok:true, bookingId: booking.id, whatsappUrl });
 });
 
 app.post("/api/admin/login", (req, res) => {
@@ -234,11 +403,16 @@ app.get("/api/admin/me", auth, (req, res) => {
   res.json({ username: req.user.username });
 });
 
-app.get("/api/admin/data", auth, (req, res) => {
-  res.json({
-    config: readJson("config.json", defaultConfig),
-    bookings: readJson("bookings.json", defaultBookings)
-  });
+app.get("/api/admin/data", auth, async (req, res) => {
+  try {
+    res.json({
+      config: readJson("config.json", defaultConfig),
+      bookings: await getBookings()
+    });
+  } catch (err) {
+    console.error("Load admin data failed:", err);
+    res.status(500).json({ error: "Could not load admin data." });
+  }
 });
 
 app.put("/api/admin/business", auth, (req, res) => {
@@ -341,21 +515,30 @@ app.delete("/api/admin/team/:id", auth, (req,res)=>{
   writeJson("config.json",c); res.json({ok:true});
 });
 
-app.put("/api/admin/bookings/:id/status", auth, (req,res)=>{
-  const bookings=readJson("bookings.json", defaultBookings);
-  const b=bookings.find(x=>x.id===req.params.id);
-  if(!b) return res.status(404).json({error:"Booking not found."});
-  const status=cleanText(req.body?.status,20);
-  if(!["pending","confirmed","cancelled","completed"].includes(status)) return res.status(400).json({error:"Invalid status."});
-  b.status=status; b.updatedAt=new Date().toISOString();
-  writeJson("bookings.json",bookings); res.json({ok:true,booking:b});
+app.put("/api/admin/bookings/:id/status", auth, async (req,res)=>{
+  try {
+    const status=cleanText(req.body?.status,20);
+    if(!["pending","confirmed","cancelled","completed"].includes(status)) {
+      return res.status(400).json({error:"Invalid status."});
+    }
+    const booking = await updateBookingStatus(req.params.id, status);
+    if(!booking) return res.status(404).json({error:"Booking not found."});
+    res.json({ok:true,booking});
+  } catch (err) {
+    console.error("Update booking failed:", err);
+    res.status(500).json({error:"Could not update booking."});
+  }
 });
 
-app.delete("/api/admin/bookings/:id", auth, (req,res)=>{
-  const bookings=readJson("bookings.json", defaultBookings);
-  const next=bookings.filter(x=>x.id!==req.params.id);
-  if(next.length===bookings.length) return res.status(404).json({error:"Booking not found."});
-  writeJson("bookings.json",next); res.json({ok:true});
+app.delete("/api/admin/bookings/:id", auth, async (req,res)=>{
+  try {
+    const deleted = await deleteBookingRecord(req.params.id);
+    if(!deleted) return res.status(404).json({error:"Booking not found."});
+    res.json({ok:true});
+  } catch (err) {
+    console.error("Delete booking failed:", err);
+    res.status(500).json({error:"Could not delete booking."});
+  }
 });
 
 app.post("/api/admin/password", auth, (req,res)=>{
@@ -378,7 +561,18 @@ app.use((req,res)=>{
   res.status(404).sendFile(path.join(PUBLIC,"index.html"));
 });
 
-app.listen(PORT, ()=>{
-  console.log(`Barbershop Pro running at http://localhost:${PORT}`);
-  console.log(`Admin panel: http://localhost:${PORT}/admin`);
-});
+async function start() {
+  try {
+    await initDatabase();
+    app.listen(PORT, ()=>{
+      console.log(`Barbershop Pro running at http://localhost:${PORT}`);
+      console.log(`Admin panel: http://localhost:${PORT}/admin`);
+    });
+  } catch (err) {
+    console.error("Startup failed:", err);
+    process.exit(1);
+  }
+}
+
+start();
+
