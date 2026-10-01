@@ -1,0 +1,131 @@
+{
+  "businessName": "Barbershop Razor",
+  "heroText": "Classic cuts, hot-towel shaves and precise finishing — always by appointment.",
+  "since": 2012,
+  "phoneDisplay": "+00 000 000 000",
+  "phoneHref": "+000000000",
+  "whatsapp": "000000000",
+  "email": "hello@barbershoprazor.example",
+  "address": "123 Example Street · Your City",
+  "mapsUrl": "https://maps.google.com/",
+  "hours": {
+    "0": null,
+    "1": null,
+    "2": [
+      "09:00",
+      "19:00"
+    ],
+    "3": [
+      "09:00",
+      "19:00"
+    ],
+    "4": [
+      "09:00",
+      "19:00"
+    ],
+    "5": [
+      "09:00",
+      "19:00"
+    ],
+    "6": [
+      "09:00",
+      "17:00"
+    ]
+  },
+  "services": [
+    {
+      "id": "svc_classic",
+      "name": "Classic haircut",
+      "desc": "Scissors and clippers with wash and styling.",
+      "price": "€20",
+      "minutes": 30,
+      "category": "Hair",
+      "active": true
+    },
+    {
+      "id": "svc_fade",
+      "name": "Fade",
+      "desc": "Clean fade with razor finishing and styling.",
+      "price": "€22",
+      "minutes": 40,
+      "category": "Hair",
+      "active": true
+    },
+    {
+      "id": "svc_kids",
+      "name": "Kids haircut",
+      "desc": "For children up to 12 years old.",
+      "price": "€14",
+      "minutes": 25,
+      "category": "Hair",
+      "active": true
+    },
+    {
+      "id": "svc_shave",
+      "name": "Hot-towel shave",
+      "desc": "Hot towel, straight razor and beard oil.",
+      "price": "€15",
+      "minutes": 25,
+      "category": "Beard",
+      "active": true
+    },
+    {
+      "id": "svc_combo",
+      "name": "Haircut + beard",
+      "desc": "The complete service in one appointment.",
+      "price": "€32",
+      "minutes": 55,
+      "category": "Combo",
+      "active": true
+    },
+    {
+      "id": "svc_trim",
+      "name": "Beard trim",
+      "desc": "Clippers, contours and finishing.",
+      "price": "€10",
+      "minutes": 15,
+      "category": "Beard",
+      "active": true
+    }
+  ],
+  "team": [
+    {
+      "id": "barber_ricardo",
+      "name": "Ricardo",
+      "initials": "R",
+      "role": "Founder",
+      "bio": "Classic cuts and straight-razor shaves.",
+      "active": true
+    },
+    {
+      "id": "barber_miguel",
+      "name": "Miguel",
+      "initials": "M",
+      "role": "Barber",
+      "bio": "Fades, texture and modern styles.",
+      "active": true
+    },
+    {
+      "id": "barber_tiago",
+      "name": "Tiago",
+      "initials": "T",
+      "role": "Barber",
+      "bio": "Kids cuts and precision finishing.",
+      "active": true
+    }
+  ],
+  "testimonials": [
+    {
+      "name": "Andrew M.",
+      "text": "On time, excellent cut and a great atmosphere. This is now my regular barbershop."
+    },
+    {
+      "name": "Ryan S.",
+      "text": "Booked from my phone in seconds. Smooth service and a very clean finish."
+    },
+    {
+      "name": "Luke F.",
+      "text": "The hot-towel shave was excellent. Professional from start to finish."
+    }
+  ]
+}

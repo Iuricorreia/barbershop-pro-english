@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin | Barbershop Pro</title>
+<link rel="stylesheet" href="/styles.css">
+<style>
+body{background:#0b1713}.admin-wrap{width:min(1240px,calc(100% - 28px));margin:30px auto}.login{max-width:430px;margin:9vh auto;background:#fff;padding:28px;border-radius:22px}.login h1{margin-top:0}.admin{display:none}.topbar{display:flex;justify-content:space-between;gap:16px;align-items:center;color:#fff;margin-bottom:20px}.layout{display:grid;grid-template-columns:220px 1fr;gap:18px}.side,.panel{background:#f5f7f5;border-radius:20px;padding:18px}.side button{width:100%;text-align:left;border:0;background:transparent;border-radius:10px;padding:11px 12px;cursor:pointer;font-weight:700;color:#415149}.side button.active,.side button:hover{background:#e8ece8;color:#13241e}.panel{min-height:620px}.view{display:none}.view.active{display:block}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.stat{background:#fff;border:1px solid rgba(19,36,30,.1);border-radius:15px;padding:18px}.stat b{display:block;font:700 1.7rem Georgia}.toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:14px}.table-wrap{overflow:auto}.table{width:100%;border-collapse:collapse;background:#fff;border-radius:14px;overflow:hidden}.table th,.table td{padding:11px;border-bottom:1px solid #e7ebe8;text-align:left;font-size:.9rem;vertical-align:top}.table th{background:#eef1ed}.pill{display:inline-flex;padding:.25rem .5rem;border-radius:999px;background:#e7ece9;font-weight:700;font-size:.75rem}.pill.confirmed{background:#dcf4e6;color:#19633e}.pill.cancelled{background:#f5dddd;color:#802929}.pill.completed{background:#e0e7f5;color:#314b81}.editor{display:grid;grid-template-columns:1fr 1fr;gap:12px}.editor .full{grid-column:1/-1}.list-card{background:#fff;border:1px solid #dde4df;border-radius:14px;padding:14px;margin:10px 0}.list-card .rowline{display:flex;justify-content:space-between;gap:14px;align-items:center}.list-card input,.list-card textarea{margin-top:7px}.days{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.day{display:grid;grid-template-columns:90px 1fr 1fr auto;gap:8px;align-items:center;background:#fff;border:1px solid #dde4df;border-radius:12px;padding:9px}.msg{font-size:.9rem}.msg.ok{color:#177143}.msg.bad{color:#9a3030}.danger{background:#9f3737}.secondary{background:#617169}.link{color:#9b7427}
+@media(max-width:850px){.layout{grid-template-columns:1fr}.side{display:flex;overflow:auto;gap:6px}.side button{min-width:max-content}.stats{grid-template-columns:1fr 1fr}.editor,.days{grid-template-columns:1fr}.editor .full{grid-column:auto}.day{grid-template-columns:80px 1fr 1fr auto}}
+</style>
+</head>
+<body>
+<div class="admin-wrap">
+  <section class="login" id="loginBox">
+    <span class="tag">ADMIN PANEL</span><h1>Sign in</h1>
+    <p class="muted">Manage bookings, services, barbers and business information.</p>
+    <form id="loginForm">
+      <label>Username<input id="loginUser" value="admin" autocomplete="username"></label>
+      <label>Password<input id="loginPass" type="password" autocomplete="current-password"></label>
+      <p class="msg" id="loginMsg"></p><button class="btn gold" type="submit">Sign in</button>
+    </form>
+    <p style="margin-top:18px"><a class="link" href="/">← Back to website</a></p>
+  </section>
+
+  <section class="admin" id="adminApp">
+    <div class="topbar"><div><span class="tag">BARBERSHOP PRO</span><h1 style="margin:.35rem 0 0">Admin dashboard</h1></div><div><a class="btn ghost small" href="/" target="_blank">View website</a> <button class="btn small" id="logoutBtn">Log out</button></div></div>
+    <div class="layout">
+      <aside class="side">
+        <button data-view="overview" class="active">Overview</button>
+        <button data-view="bookings">Bookings</button>
+        <button data-view="services">Services</button>
+        <button data-view="team">Barbers</button>
+        <button data-view="business">Business</button>
+        <button data-view="security">Security</button>
+      </aside>
+      <main class="panel">
+        <section class="view active" id="view-overview">
+          <h2>Overview</h2><div class="stats" id="stats"></div>
+          <h3 style="margin-top:28px">Latest bookings</h3><div id="latest"></div>
+        </section>
+
+        <section class="view" id="view-bookings">
+          <div class="toolbar"><div><h2 style="margin:0">Bookings</h2><span class="muted">Saved from the public booking form.</span></div><button class="btn small" onclick="loadData()">Refresh</button></div>
+          <div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Client</th><th>Service</th><th>Barber</th><th>Status</th><th>Actions</th></tr></thead><tbody id="bookingRows"></tbody></table></div>
+        </section>
+
+        <section class="view" id="view-services">
+          <div class="toolbar"><div><h2 style="margin:0">Services</h2><span class="muted">Add, edit, hide or delete services.</span></div><button class="btn gold small" onclick="addService()">+ Add service</button></div>
+          <div id="serviceEditor"></div><p class="msg" id="serviceMsg"></p>
+        </section>
+
+        <section class="view" id="view-team">
+          <div class="toolbar"><div><h2 style="margin:0">Barbers</h2><span class="muted">Manage the team shown on the website.</span></div><button class="btn gold small" onclick="addBarber()">+ Add barber</button></div>
+          <div id="teamEditor"></div><p class="msg" id="teamMsg"></p>
+        </section>
+
+        <section class="view" id="view-business">
+          <h2>Business settings</h2>
+          <form id="businessForm">
+            <div class="editor">
+              <label>Business name<input id="bizName"></label>
+              <label>Open since<input id="bizSince" type="number"></label>
+              <label class="full">Hero text<input id="bizHero"></label>
+              <label>Phone display<input id="bizPhoneDisplay"></label>
+              <label>Phone link<input id="bizPhoneHref"></label>
+              <label>WhatsApp number<input id="bizWhatsapp" placeholder="Country code + number, digits only"></label>
+              <label>Email<input id="bizEmail" type="email"></label>
+              <label class="full">Address<input id="bizAddress"></label>
+              <label class="full">Maps URL<input id="bizMaps"></label>
+            </div>
+            <h3>Opening hours</h3><div class="days" id="daysEditor"></div>
+            <p class="msg" id="businessMsg"></p><button class="btn gold" type="submit">Save business settings</button>
+          </form>
+        </section>
+
+        <section class="view" id="view-security">
+          <h2>Security</h2><p class="muted">Change the admin password. You will be signed out afterwards.</p>
+          <form id="passwordForm" style="max-width:480px">
+            <label>Current password<input id="curPass" type="password"></label>
+            <label>New password<input id="newPass" type="password" minlength="10"></label>
+            <label>Confirm new password<input id="newPass2" type="password" minlength="10"></label>
+            <p class="msg" id="passwordMsg"></p><button class="btn gold" type="submit">Change password</button>
+          </form>
+        </section>
+      </main>
+    </div>
+  </section>
+</div>
+
+<script>
+let STATE={config:null,bookings:[]};
+const $=s=>document.querySelector(s), esc=s=>String(s??"").replace(/[<>&"]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}[c]));
+async function api(url,options={}){const r=await fetch(url,{...options,headers:{"Content-Type":"application/json",...(options.headers||{})}});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||"Request failed");return j}
+async function boot(){try{await api("/api/admin/me");showAdmin();await loadData()}catch{showLogin()}}
+function showLogin(){$("#loginBox").style.display="block";$("#adminApp").style.display="none"}function showAdmin(){$("#loginBox").style.display="none";$("#adminApp").style.display="block"}
+$("#loginForm").addEventListener("submit",async e=>{e.preventDefault();const m=$("#loginMsg");m.textContent="Signing in…";try{await api("/api/admin/login",{method:"POST",body:JSON.stringify({username:$("#loginUser").value,password:$("#loginPass").value})});m.textContent="";showAdmin();await loadData()}catch(err){m.className="msg bad";m.textContent=err.message}});
+$("#logoutBtn").addEventListener("click",async()=>{await api("/api/admin/logout",{method:"POST",body:"{}"}).catch(()=>{});showLogin()});
+document.querySelectorAll(".side button").forEach(b=>b.addEventListener("click",()=>{document.querySelectorAll(".side button").forEach(x=>x.classList.remove("active"));b.classList.add("active");document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));$("#view-"+b.dataset.view).classList.add("active")}));
+
+async function loadData(){const j=await api("/api/admin/data");STATE=j;renderAll()}
+function renderAll(){renderOverview();renderBookings();renderServices();renderTeam();fillBusiness()}
+function renderOverview(){const b=STATE.bookings, c=STATE.config;const today=new Date().toISOString().slice(0,10);const counts={total:b.length,pending:b.filter(x=>x.status==="pending").length,today:b.filter(x=>x.date===today).length,services:c.services.filter(x=>x.active).length};$("#stats").innerHTML=`<div class="stat"><span class="muted">Total bookings</span><b>${counts.total}</b></div><div class="stat"><span class="muted">Pending</span><b>${counts.pending}</b></div><div class="stat"><span class="muted">Today</span><b>${counts.today}</b></div><div class="stat"><span class="muted">Active services</span><b>${counts.services}</b></div>`;$("#latest").innerHTML=b.slice(0,5).map(x=>`<div class="list-card"><b>${esc(x.name)}</b> · ${esc(x.serviceName)}<br><span class="muted">${esc(x.date)} at ${esc(x.time)} · ${esc(x.barberName)}</span></div>`).join("")||'<p class="muted">No bookings yet.</p>'}
+function renderBookings(){$("#bookingRows").innerHTML=STATE.bookings.map(b=>`<tr><td><b>${esc(b.date)}</b><br>${esc(b.time)}</td><td>${esc(b.name)}<br><span class="muted">${esc(b.phone)}</span></td><td>${esc(b.serviceName)}</td><td>${esc(b.barberName)}</td><td><span class="pill ${esc(b.status)}">${esc(b.status)}</span></td><td><select onchange="setStatus('${b.id}',this.value)"><option ${b.status==="pending"?"selected":""}>pending</option><option ${b.status==="confirmed"?"selected":""}>confirmed</option><option ${b.status==="completed"?"selected":""}>completed</option><option ${b.status==="cancelled"?"selected":""}>cancelled</option></select><br><button class="btn small danger" style="margin-top:7px" onclick="deleteBooking('${b.id}')">Delete</button></td></tr>`).join("")||'<tr><td colspan="6">No bookings yet.</td></tr>'}
+async function setStatus(id,status){await api(`/api/admin/bookings/${id}/status`,{method:"PUT",body:JSON.stringify({status})});await loadData()}
+async function deleteBooking(id){if(!confirm("Delete this booking?"))return;await api(`/api/admin/bookings/${id}`,{method:"DELETE"});await loadData()}
+
+function serviceCard(s){return `<div class="list-card" data-service="${s.id}"><div class="rowline"><b>${esc(s.name)}</b><label style="display:flex;align-items:center;gap:6px">Active <input class="s-active" type="checkbox" ${s.active?"checked":""}></label></div><div class="editor"><label>Name<input class="s-name" value="${esc(s.name)}"></label><label>Price<input class="s-price" value="${esc(s.price)}"></label><label>Category<input class="s-category" value="${esc(s.category)}"></label><label>Minutes<input class="s-minutes" type="number" value="${esc(s.minutes)}"></label><label class="full">Description<textarea class="s-desc">${esc(s.desc)}</textarea></label></div><button class="btn small" onclick="saveService('${s.id}')">Save</button> <button class="btn small danger" onclick="deleteService('${s.id}')">Delete</button></div>`}
+function renderServices(){$("#serviceEditor").innerHTML=STATE.config.services.map(serviceCard).join("")}
+async function saveService(id){const e=document.querySelector(`[data-service="${id}"]`),p={name:e.querySelector(".s-name").value,price:e.querySelector(".s-price").value,category:e.querySelector(".s-category").value,minutes:e.querySelector(".s-minutes").value,desc:e.querySelector(".s-desc").value,active:e.querySelector(".s-active").checked};await api(`/api/admin/services/${id}`,{method:"PUT",body:JSON.stringify(p)});$("#serviceMsg").className="msg ok";$("#serviceMsg").textContent="Service saved.";await loadData()}
+async function addService(){const name=prompt("Service name:");if(!name)return;const price=prompt("Price:","€20")||"€20";await api("/api/admin/services",{method:"POST",body:JSON.stringify({name,price,desc:"",category:"Service",minutes:30,active:true})});await loadData()}
+async function deleteService(id){if(!confirm("Delete this service?"))return;await api(`/api/admin/services/${id}`,{method:"DELETE"});await loadData()}
+
+function barberCard(p){return `<div class="list-card" data-barber="${p.id}"><div class="rowline"><b>${esc(p.name)}</b><label style="display:flex;align-items:center;gap:6px">Active <input class="b-active" type="checkbox" ${p.active?"checked":""}></label></div><div class="editor"><label>Name<input class="b-name" value="${esc(p.name)}"></label><label>Initials<input class="b-initials" value="${esc(p.initials)}"></label><label>Role<input class="b-role" value="${esc(p.role)}"></label><label class="full">Bio<textarea class="b-bio">${esc(p.bio)}</textarea></label></div><button class="btn small" onclick="saveBarber('${p.id}')">Save</button> <button class="btn small danger" onclick="deleteBarber('${p.id}')">Delete</button></div>`}
+function renderTeam(){$("#teamEditor").innerHTML=STATE.config.team.map(barberCard).join("")}
+async function saveBarber(id){const e=document.querySelector(`[data-barber="${id}"]`),p={name:e.querySelector(".b-name").value,initials:e.querySelector(".b-initials").value,role:e.querySelector(".b-role").value,bio:e.querySelector(".b-bio").value,active:e.querySelector(".b-active").checked};await api(`/api/admin/team/${id}`,{method:"PUT",body:JSON.stringify(p)});$("#teamMsg").className="msg ok";$("#teamMsg").textContent="Barber saved.";await loadData()}
+async function addBarber(){const name=prompt("Barber name:");if(!name)return;await api("/api/admin/team",{method:"POST",body:JSON.stringify({name,initials:name[0].toUpperCase(),role:"Barber",bio:"",active:true})});await loadData()}
+async function deleteBarber(id){if(!confirm("Delete this barber?"))return;await api(`/api/admin/team/${id}`,{method:"DELETE"});await loadData()}
+
+const days=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+function fillBusiness(){const c=STATE.config;$("#bizName").value=c.businessName;$("#bizSince").value=c.since;$("#bizHero").value=c.heroText;$("#bizPhoneDisplay").value=c.phoneDisplay;$("#bizPhoneHref").value=c.phoneHref;$("#bizWhatsapp").value=c.whatsapp;$("#bizEmail").value=c.email;$("#bizAddress").value=c.address;$("#bizMaps").value=c.mapsUrl;$("#daysEditor").innerHTML=days.map((n,d)=>{const h=c.hours[String(d)];return `<div class="day" data-day="${d}"><b>${n}</b><input class="open" type="time" value="${h?h[0]:"09:00"}"><input class="close" type="time" value="${h?h[1]:"18:00"}"><label style="display:flex;gap:5px;align-items:center">Closed <input class="closed" type="checkbox" ${h?"":"checked"}></label></div>`}).join("")}
+$("#businessForm").addEventListener("submit",async e=>{e.preventDefault();const hours={};document.querySelectorAll(".day").forEach(row=>{hours[row.dataset.day]=row.querySelector(".closed").checked?null:[row.querySelector(".open").value,row.querySelector(".close").value]});const p={businessName:$("#bizName").value,since:$("#bizSince").value,heroText:$("#bizHero").value,phoneDisplay:$("#bizPhoneDisplay").value,phoneHref:$("#bizPhoneHref").value,whatsapp:$("#bizWhatsapp").value,email:$("#bizEmail").value,address:$("#bizAddress").value,mapsUrl:$("#bizMaps").value,hours};const m=$("#businessMsg");try{await api("/api/admin/business",{method:"PUT",body:JSON.stringify(p)});m.className="msg ok";m.textContent="Business settings saved.";await loadData()}catch(err){m.className="msg bad";m.textContent=err.message}});
+$("#passwordForm").addEventListener("submit",async e=>{e.preventDefault();const m=$("#passwordMsg"),a=$("#newPass").value,b=$("#newPass2").value;if(a!==b){m.className="msg bad";m.textContent="New passwords do not match.";return}try{await api("/api/admin/password",{method:"POST",body:JSON.stringify({currentPassword:$("#curPass").value,newPassword:a})});alert("Password changed. Please sign in again.");location.reload()}catch(err){m.className="msg bad";m.textContent=err.message}});
+boot();
+</script>
+</body>
+</html>

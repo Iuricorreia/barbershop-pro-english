@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Barbershop Razor</title><meta name="description" content="Classic haircuts, hot-towel shaves and online booking.">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header><div class="wrap nav">
+  <a class="brand" href="#home"><span class="mini-pole"></span><span id="brand">Barbershop Razor</span></a>
+  <nav><a href="#services">Services</a><a href="#team">Team</a><a href="#contact">Contact</a><a class="btn gold small" href="#booking">Book now</a><a class="btn ghost small" href="/admin">Admin</a></nav>
+</div></header>
+
+<main>
+<section class="hero" id="home"><div class="wrap hero-in">
+  <div>
+    <span class="tag">PREMIUM BARBERSHOP</span>
+    <h1>Tradition in every cut. <em>Precision</em> in every detail.</h1>
+    <p id="heroText">Classic cuts, hot-towel shaves and precise finishing — always by appointment.</p>
+    <div class="actions"><a class="btn gold" href="#booking">Book an appointment →</a><a class="btn ghost" href="#services">View prices</a></div>
+    <div class="status"><span class="dot" id="dot"></span><span id="statusText">Checking opening hours…</span></div>
+    <div class="facts"><div><b id="since">2012</b><span>Open since</span></div><div><b id="teamCount">3</b><span>Barbers</span></div><div><b>30 min</b><span>Average service</span></div></div>
+  </div>
+  <div class="hero-art"><div class="big-pole"></div></div>
+</div></section>
+
+<section class="section" id="services"><div class="wrap">
+  <div class="section-head"><div><span class="tag">SERVICES</span><h2>Choose your style</h2></div><p class="muted">Professional services with clear pricing and easy online booking.</p></div>
+  <div class="grid3" id="servicesGrid"></div>
+</div></section>
+
+<section class="section" id="team"><div class="wrap">
+  <div class="section-head"><div><span class="tag">TEAM</span><h2>Meet the barbers</h2></div><p class="muted">Choose your preferred barber or leave it open when you book.</p></div>
+  <div class="grid3" id="teamGrid"></div>
+</div></section>
+
+<section class="section"><div class="wrap">
+  <div class="section-head"><div><span class="tag">REVIEWS</span><h2>What clients say</h2></div><p class="muted">A clean review section ready for real customer testimonials.</p></div>
+  <div class="grid3" id="reviewsGrid"></div>
+</div></section>
+
+<section class="section" id="booking"><div class="wrap booking">
+  <div class="booking-grid">
+    <div><span class="tag">BOOKING</span><h2 style="font-size:2.6rem">Book in less than a minute.</h2><p>Your request is saved in the admin panel. If WhatsApp is configured, you can also send the booking there instantly.</p></div>
+    <form id="bookingForm">
+      <div class="row"><label>Name<input id="name" required autocomplete="name" placeholder="Your name"></label><label>Phone<input id="phone" autocomplete="tel" placeholder="+33 ..."></label></div>
+      <div class="row"><label>Service<select id="service" required></select></label><label>Barber<select id="barber"></select></label></div>
+      <div class="row"><label>Date<input id="date" type="date" required></label><label>Time<select id="time" required><option value="">Choose a date first</option></select></label></div>
+      <label>Notes<textarea id="notes" placeholder="Example: low fade, short beard…"></textarea></label>
+      <p class="form-msg" id="formMsg"></p>
+      <button class="btn gold" type="submit">Send booking request</button>
+      <p class="muted" style="font-size:.8rem;margin:0">The appointment is confirmed only after the barbershop accepts it.</p>
+    </form>
+  </div>
+</div></section>
+
+<section class="section" id="contact"><div class="wrap contact-grid">
+  <div class="card contact-card"><span class="tag">HOURS</span><h2>Opening hours</h2><table class="hours" id="hours"></table></div>
+  <div class="card contact-card"><span class="tag">CONTACT</span><h2>Find us</h2><p id="address" class="muted"></p><p><a id="phoneLink"></a></p><p><a id="emailLink"></a></p><p><a id="mapsLink" target="_blank" rel="noopener">Open in Maps ↗</a></p></div>
+</div></section>
+</main>
+
+<footer><div class="wrap foot"><a class="brand" href="#home"><span class="mini-pole"></span><span id="footerBrand">Barbershop Razor</span></a><span>© <span id="year"></span> · Booking system included</span></div></footer>
+
+<script>
+let DATA=null;
+const dayNames=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+const $=s=>document.querySelector(s);
+function esc(s){return String(s??"").replace(/[<>&"]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}[c]));}
+async function load(){
+  const r=await fetch("/api/public"); DATA=await r.json();
+  document.title=DATA.businessName+" | Book online";
+  $("#brand").textContent=$("#footerBrand").textContent=DATA.businessName;
+  $("#heroText").textContent=DATA.heroText; $("#since").textContent=DATA.since; $("#teamCount").textContent=DATA.team.length; $("#year").textContent=new Date().getFullYear();
+  $("#address").textContent=DATA.address; $("#phoneLink").textContent=DATA.phoneDisplay; $("#phoneLink").href="tel:"+DATA.phoneHref; $("#emailLink").textContent=DATA.email; $("#emailLink").href="mailto:"+DATA.email; $("#mapsLink").href=DATA.mapsUrl||"#";
+  $("#servicesGrid").innerHTML=DATA.services.map(s=>`<article class="card service"><span class="tag">${esc(s.category)}</span><h3>${esc(s.name)}</h3><p class="muted">${esc(s.desc)}</p><div class="meta"><span>${esc(s.minutes)} min</span><b>${esc(s.price)}</b></div></article>`).join("");
+  $("#teamGrid").innerHTML=DATA.team.map(p=>`<article class="card person"><div class="avatar">${esc(p.initials)}</div><span class="tag" style="margin-top:14px">${esc(p.role)}</span><h3>${esc(p.name)}</h3><p class="muted">${esc(p.bio)}</p></article>`).join("");
+  $("#reviewsGrid").innerHTML=(DATA.testimonials||[]).map(q=>`<article class="card quote"><div class="stars">★★★★★</div><p>“${esc(q.text)}”</p><small class="muted">${esc(q.name)}</small></article>`).join("");
+  $("#service").innerHTML='<option value="">Choose a service</option>'+DATA.services.map(s=>`<option value="${esc(s.id)}">${esc(s.name)} · ${esc(s.price)}</option>`).join("");
+  $("#barber").innerHTML='<option value="">No preference</option>'+DATA.team.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
+  renderHours(); renderStatus(); setupDate();
+}
+function renderHours(){
+  $("#hours").innerHTML=dayNames.map((n,d)=>{const h=DATA.hours[String(d)];return `<tr data-day="${d}"><td>${n}</td><td>${h?esc(h[0])+" – "+esc(h[1]):"Closed"}</td></tr>`}).join("");
+  document.querySelector(`tr[data-day="${new Date().getDay()}"]`)?.classList.add("today");
+}
+function renderStatus(){
+  const now=new Date(), h=DATA.hours[String(now.getDay())], cur=String(now.getHours()).padStart(2,"0")+":"+String(now.getMinutes()).padStart(2,"0"), open=!!h&&cur>=h[0]&&cur<h[1];
+  $("#dot").classList.toggle("on",open); $("#statusText").textContent=open?`Open now, until ${h[1]}`:"Closed right now";
+}
+function setupDate(){
+  const d=$("#date"), offset=new Date().getTimezoneOffset()*60000; d.min=new Date(Date.now()-offset).toISOString().slice(0,10); d.addEventListener("change",buildTimes);
+}
+function buildTimes(){
+  const v=$("#date").value,t=$("#time"); if(!v){t.innerHTML='<option value="">Choose a date first</option>';return;}
+  const day=new Date(v+"T12:00:00").getDay(),h=DATA.hours[String(day)]; if(!h){t.innerHTML='<option value="">Closed on this day</option>';return;}
+  const [oh,om]=h[0].split(":").map(Number),[ch,cm]=h[1].split(":").map(Number),opts=[];
+  for(let m=oh*60+om;m<ch*60+cm;m+=30){const hh=String(Math.floor(m/60)).padStart(2,"0"),mm=String(m%60).padStart(2,"0");opts.push(`${hh}:${mm}`)}
+  t.innerHTML='<option value="">Choose a time</option>'+opts.map(x=>`<option>${x}</option>`).join("");
+}
+$("#bookingForm").addEventListener("submit",async e=>{
+  e.preventDefault(); const msg=$("#formMsg"); msg.className="form-msg"; msg.textContent="Saving your booking…";
+  const payload={name:$("#name").value,phone:$("#phone").value,serviceId:$("#service").value,barberId:$("#barber").value,date:$("#date").value,time:$("#time").value,notes:$("#notes").value};
+  try{
+    const r=await fetch("/api/bookings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),j=await r.json();
+    if(!r.ok) throw new Error(j.error||"Booking failed.");
+    msg.className="form-msg ok"; msg.textContent=`Booking saved. Reference: ${j.bookingId}`;
+    if(j.whatsappUrl && confirm("Booking saved. Open WhatsApp to send it to the barbershop too?")) window.open(j.whatsappUrl,"_blank","noopener");
+    e.target.reset(); buildTimes();
+  }catch(err){msg.className="form-msg bad";msg.textContent=err.message}
+});
+load().catch(()=>{$("#statusText").textContent="Could not load site data.";});
+</script>
+</body>
+</html>
