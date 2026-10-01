@@ -134,13 +134,16 @@ const defaultBookings = [];
 function ensureSeed() {
   readJson("config.json", defaultConfig);
   readJson("bookings.json", defaultBookings);
-  const adminPath = path.join(DATA, "admin.json");
-  if (!fs.existsSync(adminPath)) {
-    const username = process.env.ADMIN_USER || "admin";
-    const password = process.env.ADMIN_PASSWORD || "ChangeMe123!";
-    const pw = hashPassword(password);
-    writeJson("admin.json", { username, ...pw, updatedAt: new Date().toISOString() });
-    console.log(`Admin created: ${username}`);
+
+  if (!pool) {
+    const adminPath = path.join(DATA, "admin.json");
+    if (!fs.existsSync(adminPath)) {
+      const username = process.env.ADMIN_USER || "admin";
+      const password = process.env.ADMIN_PASSWORD || "ChangeMe123!";
+      const pw = hashPassword(password);
+      writeJson("admin.json", { username, ...pw, updatedAt: new Date().toISOString() });
+      console.log(`Local admin created: ${username}`);
+    }
   }
 }
 ensureSeed();
@@ -214,6 +217,30 @@ async function initDatabase() {
     [JSON.stringify(localConfig)]
   );
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS admin_users (
+      id SMALLINT PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      salt TEXT NOT NULL,
+      hash TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  const existingAdmin = await pool.query(`SELECT id FROM admin_users WHERE id=1`);
+  if (!existingAdmin.rows[0]) {
+    const username = process.env.ADMIN_USER || "admin";
+    const password = process.env.ADMIN_PASSWORD || "ChangeMe123!";
+    const pw = hashPassword(password);
+    await pool.query(
+      `INSERT INTO admin_users (id, username, salt, hash, updated_at)
+       VALUES (1, $1, $2, $3, NOW())`,
+      [username, pw.salt, pw.hash]
+    );
+    console.log(`PostgreSQL admin created: ${username}`);
+  }
+
+  console.log("PostgreSQL admin ready.");
   console.log("PostgreSQL bookings table ready.");
   console.log("PostgreSQL site config ready.");
 }
@@ -238,6 +265,39 @@ async function saveConfig(config) {
     [JSON.stringify(config)]
   );
   return config;
+}
+
+async function getAdmin() {
+  if (!pool) return readJson("admin.json", {});
+
+  const { rows } = await pool.query(`
+    SELECT username, salt, hash, updated_at AS "updatedAt"
+    FROM admin_users
+    WHERE id=1
+  `);
+
+  return rows[0] || {};
+}
+
+async function saveAdmin(admin) {
+  if (!pool) {
+    writeJson("admin.json", admin);
+    return admin;
+  }
+
+  await pool.query(
+    `INSERT INTO admin_users (id, username, salt, hash, updated_at)
+     VALUES (1, $1, $2, $3, NOW())
+     ON CONFLICT (id)
+     DO UPDATE SET
+       username=EXCLUDED.username,
+       salt=EXCLUDED.salt,
+       hash=EXCLUDED.hash,
+       updated_at=NOW()`,
+    [admin.username, admin.salt, admin.hash]
+  );
+
+  return admin;
 }
 
 async function getBookings() {
@@ -420,15 +480,22 @@ app.post("/api/bookings", async (req, res) => {
   }
 });
 
-app.post("/api/admin/login", (req, res) => {
-  const username = cleanText(req.body?.username, 80);
-  const password = String(req.body?.password || "");
-  const admin = readJson("admin.json", {});
-  if (username !== admin.username || !verifyPassword(password, admin)) {
-    return res.status(401).json({ error: "Invalid username or password." });
+app.post("/api/admin/login", async (req, res) => {
+  try {
+    const username = cleanText(req.body?.username, 80);
+    const password = String(req.body?.password || "");
+    const admin = await getAdmin();
+
+    if (username !== admin.username || !verifyPassword(password, admin)) {
+      return res.status(401).json({ error: "Invalid username or password." });
+    }
+
+    makeSession(res, username);
+    res.json({ ok:true, username });
+  } catch (err) {
+    console.error("Admin login failed:", err);
+    res.status(500).json({ error: "Could not sign in." });
   }
-  makeSession(res, username);
-  res.json({ ok:true, username });
 });
 
 app.post("/api/admin/logout", auth, (req, res) => {
@@ -577,17 +644,33 @@ app.delete("/api/admin/bookings/:id", auth, async (req,res)=>{
   }
 });
 
-app.post("/api/admin/password", auth, (req,res)=>{
-  const current=String(req.body?.currentPassword||"");
-  const next=String(req.body?.newPassword||"");
-  const admin=readJson("admin.json",{});
-  if(!verifyPassword(current,admin)) return res.status(400).json({error:"Current password is incorrect."});
-  if(next.length<10) return res.status(400).json({error:"New password must be at least 10 characters."});
-  const pw=hashPassword(next);
-  writeJson("admin.json",{username:admin.username,...pw,updatedAt:new Date().toISOString()});
-  sessions.clear();
-  res.setHeader("Set-Cookie","barber_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
-  res.json({ok:true});
+app.post("/api/admin/password", auth, async (req,res)=>{
+  try {
+    const current=String(req.body?.currentPassword||"");
+    const next=String(req.body?.newPassword||"");
+    const admin=await getAdmin();
+
+    if(!verifyPassword(current,admin)) {
+      return res.status(400).json({error:"Current password is incorrect."});
+    }
+    if(next.length<10) {
+      return res.status(400).json({error:"New password must be at least 10 characters."});
+    }
+
+    const pw=hashPassword(next);
+    await saveAdmin({
+      username:admin.username,
+      ...pw,
+      updatedAt:new Date().toISOString()
+    });
+
+    sessions.clear();
+    res.setHeader("Set-Cookie","barber_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
+    res.json({ok:true});
+  } catch (err) {
+    console.error("Password update failed:", err);
+    res.status(500).json({error:"Could not update password."});
+  }
 });
 
 app.get("/admin", (req,res)=>res.sendFile(path.join(PUBLIC,"admin.html")));
@@ -611,5 +694,6 @@ async function start() {
 }
 
 start();
+
 
 
