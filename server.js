@@ -199,7 +199,45 @@ async function initDatabase() {
     ]);
   }
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS site_config (
+      id SMALLINT PRIMARY KEY,
+      data JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  const localConfig = readJson("config.json", defaultConfig);
+  await pool.query(
+    `INSERT INTO site_config (id, data) VALUES (1, $1::jsonb)
+     ON CONFLICT (id) DO NOTHING`,
+    [JSON.stringify(localConfig)]
+  );
+
   console.log("PostgreSQL bookings table ready.");
+  console.log("PostgreSQL site config ready.");
+}
+
+async function getConfig() {
+  if (!pool) return readJson("config.json", defaultConfig);
+  const { rows } = await pool.query(`SELECT data FROM site_config WHERE id=1`);
+  if (!rows[0]) return structuredClone(defaultConfig);
+  return rows[0].data;
+}
+
+async function saveConfig(config) {
+  if (!pool) {
+    writeJson("config.json", config);
+    return config;
+  }
+  await pool.query(
+    `INSERT INTO site_config (id, data, updated_at)
+     VALUES (1, $1::jsonb, NOW())
+     ON CONFLICT (id)
+     DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()`,
+    [JSON.stringify(config)]
+  );
+  return config;
 }
 
 async function getBookings() {
@@ -304,8 +342,8 @@ async function deleteBookingRecord(idValue) {
   return result.rowCount > 0;
 }
 
-app.get("/api/public", (req, res) => {
-  const c = readJson("config.json", defaultConfig);
+app.get("/api/public", async (req, res) => {
+  const c = await getConfig();
   const safe = {
     businessName: c.businessName, heroText: c.heroText, since: c.since,
     phoneDisplay: c.phoneDisplay, phoneHref: c.phoneHref, whatsappEnabled: validWhatsapp(c.whatsapp) && c.whatsapp !== "000000000",
@@ -335,7 +373,7 @@ app.post("/api/bookings", async (req, res) => {
       return res.status(400).json({ error: "Invalid date or time." });
     }
 
-    const config = readJson("config.json", defaultConfig);
+    const config = await getConfig();
     const service = (config.services || []).find(x => x.id === serviceId && x.active);
     const barber = barberId ? (config.team || []).find(x => x.id === barberId && x.active) : null;
     if (!service) return res.status(400).json({ error: "Service is not available." });
@@ -405,18 +443,16 @@ app.get("/api/admin/me", auth, (req, res) => {
 
 app.get("/api/admin/data", auth, async (req, res) => {
   try {
-    res.json({
-      config: readJson("config.json", defaultConfig),
-      bookings: await getBookings()
-    });
+    const [config, bookings] = await Promise.all([getConfig(), getBookings()]);
+    res.json({ config, bookings });
   } catch (err) {
     console.error("Load admin data failed:", err);
     res.status(500).json({ error: "Could not load admin data." });
   }
 });
 
-app.put("/api/admin/business", auth, (req, res) => {
-  const c = readJson("config.json", defaultConfig);
+app.put("/api/admin/business", auth, async (req, res) => {
+  const c = await getConfig();
   const b = req.body || {};
   c.businessName = cleanText(b.businessName, 120) || c.businessName;
   c.heroText = cleanText(b.heroText, 300) || c.heroText;
@@ -441,12 +477,12 @@ app.put("/api/admin/business", auth, (req, res) => {
     }
     c.hours = next;
   }
-  writeJson("config.json", c);
+  await saveConfig(c);
   res.json({ ok:true, config:c });
 });
 
-app.post("/api/admin/services", auth, (req, res) => {
-  const c = readJson("config.json", defaultConfig);
+app.post("/api/admin/services", auth, async (req, res) => {
+  const c = await getConfig();
   const b = req.body || {};
   const service = {
     id:id("svc"),
@@ -458,12 +494,12 @@ app.post("/api/admin/services", auth, (req, res) => {
     active:b.active !== false
   };
   if (!service.name || !service.price) return res.status(400).json({ error:"Name and price are required." });
-  c.services.push(service); writeJson("config.json", c);
+  c.services.push(service); await saveConfig(c);
   res.status(201).json({ ok:true, service });
 });
 
-app.put("/api/admin/services/:id", auth, (req, res) => {
-  const c = readJson("config.json", defaultConfig);
+app.put("/api/admin/services/:id", auth, async (req, res) => {
+  const c = await getConfig();
   const s = c.services.find(x => x.id === req.params.id);
   if (!s) return res.status(404).json({ error:"Service not found." });
   const b=req.body||{};
@@ -473,29 +509,29 @@ app.put("/api/admin/services/:id", auth, (req, res) => {
   if ("minutes" in b) s.minutes=int(b.minutes,5,240,s.minutes);
   if ("category" in b) s.category=cleanText(b.category,50);
   if ("active" in b) s.active=!!b.active;
-  writeJson("config.json", c); res.json({ ok:true, service:s });
+  await saveConfig(c); res.json({ ok:true, service:s });
 });
 
-app.delete("/api/admin/services/:id", auth, (req, res) => {
-  const c = readJson("config.json", defaultConfig);
+app.delete("/api/admin/services/:id", auth, async (req, res) => {
+  const c = await getConfig();
   const before = c.services.length;
   c.services = c.services.filter(x => x.id !== req.params.id);
   if (c.services.length === before) return res.status(404).json({ error:"Service not found." });
-  writeJson("config.json", c); res.json({ ok:true });
+  await saveConfig(c); res.json({ ok:true });
 });
 
-app.post("/api/admin/team", auth, (req, res) => {
-  const c = readJson("config.json", defaultConfig);
+app.post("/api/admin/team", auth, async (req, res) => {
+  const c = await getConfig();
   const b=req.body||{};
   const name=cleanText(b.name,100);
   if(!name) return res.status(400).json({error:"Name is required."});
   const person={id:id("barber"),name,initials:cleanText(b.initials,5)||name.slice(0,1).toUpperCase(),role:cleanText(b.role,80)||"Barber",bio:cleanText(b.bio,250),active:b.active!==false};
-  c.team.push(person); writeJson("config.json", c);
+  c.team.push(person); await saveConfig(c);
   res.status(201).json({ok:true,person});
 });
 
-app.put("/api/admin/team/:id", auth, (req, res) => {
-  const c = readJson("config.json", defaultConfig);
+app.put("/api/admin/team/:id", auth, async (req, res) => {
+  const c = await getConfig();
   const p = c.team.find(x => x.id === req.params.id);
   if (!p) return res.status(404).json({error:"Barber not found."});
   const b=req.body||{};
@@ -504,15 +540,15 @@ app.put("/api/admin/team/:id", auth, (req, res) => {
   if("role" in b) p.role=cleanText(b.role,80);
   if("bio" in b) p.bio=cleanText(b.bio,250);
   if("active" in b) p.active=!!b.active;
-  writeJson("config.json", c); res.json({ok:true,person:p});
+  await saveConfig(c); res.json({ok:true,person:p});
 });
 
-app.delete("/api/admin/team/:id", auth, (req,res)=>{
-  const c=readJson("config.json", defaultConfig);
+app.delete("/api/admin/team/:id", auth, async (req,res)=>{
+  const c=await getConfig();
   const before=c.team.length;
   c.team=c.team.filter(x=>x.id!==req.params.id);
   if(c.team.length===before) return res.status(404).json({error:"Barber not found."});
-  writeJson("config.json",c); res.json({ok:true});
+  await saveConfig(c); res.json({ok:true});
 });
 
 app.put("/api/admin/bookings/:id/status", auth, async (req,res)=>{
@@ -575,4 +611,5 @@ async function start() {
 }
 
 start();
+
 
